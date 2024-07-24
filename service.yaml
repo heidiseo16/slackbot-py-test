@@ -1,0 +1,38 @@
+name: slack-llm-bot-test
+message: Summarizer-Test
+image: docker.io/node:lts
+resources:
+  cluster: vessl-gcp-oregon
+  preset: gpu-l4-small
+import:
+  /app: git://github.com/heidiseo16/slackbot-py-test.git
+run:
+  - command: |
+      pip install -r requirements.txt
+      python app.py
+    workdir: /app
+env:
+  SLACK_BOT_TOKEN:
+    secret: slackbot-token
+    source: secret
+  SLACK_SIGNING_SECRET:
+    secret: slack-signing-secret
+    source: secret
+  OPENAI_API_KEY:
+    secret: openai-api-key
+    source: secret
+  OPENAI_ORGANIZATION_ID:
+    secret: openai-organization-id
+    source: secret
+  OPENAI_PROJECT_ID:
+    secret: openai-project-id
+    source: secret
+ports:
+  - port: 3000
+service:
+  autoscaling:
+    max: 2
+    metric: cpu
+    min: 1
+    target: 50
+  expose: 3000
