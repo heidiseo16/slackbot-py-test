@@ -1,10 +1,9 @@
 import os
 import re
 from dotenv import load_dotenv
-from slack_bolt import App
+from slack_bolt.async_app import AsyncApp
 from slack_sdk import WebClient
 from openai import OpenAI
-import asyncio
 
 dotenv_paths = [".env.local", ".env", ".env.development.local", ".env.development"]
 
@@ -18,13 +17,11 @@ openai_organization_id = os.getenv("OPENAI_ORGANIZATION_ID")
 openai_project_id = os.getenv("OPENAI_PROJECT_ID")
 port = int(os.getenv('PORT', 3000))
 
-# Initialize Slack app
-app = App(
+app = AsyncApp(
     token=slack_token,
     signing_secret=slack_signing_secret,
 )
 
-# Initialize OpenAI
 openai = OpenAI(
     organization=openai_organization_id,
     project=openai_project_id,
@@ -45,7 +42,14 @@ async def fetch_recent_messages(channel, limit=10, thread_ts=None):
         else:
             result = await app.client.conversations_history(channel=channel, limit=limit)
         if result['messages']:
-            return [SlackMessage(**msg) for msg in result['messages']]
+            messages = [
+                SlackMessage(text=msg['text'], user=msg['user'], channel=channel, thread_ts=msg.get('thread_ts'))
+                for msg in result['messages']
+            ]
+            #return [SlackMessage(**msg) for msg in result['messages']]
+            return messages
+        else:
+            return []
     except Exception as e:
         print(f"Error fetching messages: {e}")
         return []
@@ -60,7 +64,6 @@ def system_prompt(question=None):
         )
     }
 
-# Diff
 async def get_user_map(users):
     user_map = {}
     for user in users:
@@ -68,7 +71,7 @@ async def get_user_map(users):
         user_map[user] = user_info.get('user', {}).get('name', 'Unknown')
     return user_map
 
-
+#FIX
 async def summarize_text(chats, question=None):
     try:
         user_map = await get_user_map([chat.user for chat in chats])
@@ -90,24 +93,24 @@ async def summarize_text(chats, question=None):
         system_prmpt = system_prompt(question)
         if question:
             messages.append({"role": "user", "content": f"@#*&Question: {question}", "user": "definetly not a bot"})
-        
-        chat_completion = await openai.Completion.create(
+       
+        chat_completion = openai.chat.completions.create(
             model="gpt-4o",
-            prompt=[system_prmpt, *messages],
+            messages=[system_prmpt, *messages],
             temperature=0.5
         )
-        #return chat_completion.choices[0].text.strip()
-        return chat_completion['choices'][0]['message']['content'] if chat_completion['choices'] else "No summary found."
+        return chat_completion.choices[0].message.content if chat_completion.choices[0] else "No summary found."
     except Exception as e:
         print(f"Error summarizing text: {e}")
         return "Error summarizing text."
-
+    
 async def post_message(channel_id, text, thread_ts=None):
     try:
-        await app.client.chat.postMessage(channel=channel_id, text=text, thread_ts=thread_ts)
+        await app.client.chat_postMessage(channel=channel_id, text=text, thread_ts=thread_ts)
     except Exception as e:
         print(f"Error posting message: {e}")
 
+#FIX
 async def handle_summarize_request(channel_id, question=None, thread_ts=None, limit=10):
     messages = await fetch_recent_messages(channel_id, limit, thread_ts)
     if messages:
@@ -120,9 +123,8 @@ options = {
     "--limit": "Set the limit of messages to summarize",
 }
 
-
 @app.event("app_mention")
-async def handle_app_mention(event, context):
+async def handle_app_mention(event, say):
     try:
         channel = event["channel"]
         thread_ts = event.get("thread_ts")
@@ -149,15 +151,18 @@ async def handle_app_mention(event, context):
         limit = 10
         if "--limit" in prompt:
             parts = prompt.split("--limit")
-            prompt = parts[0].strip()
+            prompt = parts[0]
             limit = int(parts[1].strip()) if parts[1].strip().isdigit() else 10
         
         if prompt.strip() != "summarize":
-            question = prompt.strip()
+            question = prompt
 
         await handle_summarize_request(channel, question, thread_ts, limit)
     except Exception as e:
         print(f"Error handling app_mention event: {e}")
+
+#@app.event("message")
+# Check how the app runs when asked a question w/o summarize
 
 @app.message(re.compile(r'!summarize\s*(".*")?\s*([0-9]*)'))
 async def handle_message(context, message, say):
@@ -172,9 +177,6 @@ async def handle_message(context, message, say):
     except Exception as error:
         print(f"Error handling message event: {error}")
 
-async def main():
-    await app.start(port)
-
 if __name__ == "__main__":
     print(f"⚡️ Slack Bolt app is running on port {port}!")
-    asyncio.run(main())
+    app.start(port=port)
