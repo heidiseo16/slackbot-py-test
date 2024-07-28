@@ -2,7 +2,6 @@ import os
 import re
 from dotenv import load_dotenv
 from slack_bolt.async_app import AsyncApp
-from slack_sdk import WebClient
 from openai import OpenAI
 
 dotenv_paths = [".env.local", ".env", ".env.development.local", ".env.development"]
@@ -75,14 +74,13 @@ async def get_user_map(users):
     user_map = {}
     for user in users:
         user_info = await app.client.users_info(user=user)
-        #user_map[user] = user_info.get('user', {}).get('name', 'Unknown')
         profile = user_info.get('user', {}).get('profile', {})
         display_name = profile.get('display_name', '') or profile.get('real_name', 'Unknown')
         user_map[user] = display_name
     return user_map
 
 
-async def summarize_text(chats, question=None):
+async def summarize_text(chats, bot_user_id, question=None):
     try:
         user_map = await get_user_map([chat.user for chat in chats])
         messages = []
@@ -90,8 +88,10 @@ async def summarize_text(chats, question=None):
         for chat in chats:
             if chat.text.startswith("summarize"):
                 continue
+            if f"<@{bot_user_id}>" in chat.text:
+                continue
             speaker = user_map.get(chat.user, "Unknown")
-            if speaker == "summarizer":
+            if speaker == "Personal-Summarizer":
                 continue
             if chat.text.startswith("<@U07AF4DJWRH>"):
                 continue
@@ -121,10 +121,10 @@ async def post_message(channel_id, text, thread_ts=None):
     except Exception as e:
         print(f"Error posting message: {e}")
 
-async def handle_summarize_request(channel_id, question=None, thread_ts=None, limit=10):
+async def handle_summarize_request(channel_id, bot_user_id, question=None, thread_ts=None, limit=10):
     messages = await fetch_recent_messages(channel_id, limit, thread_ts)
     if len(messages) > 0:
-        summary = await summarize_text(messages, question)
+        summary = await summarize_text(messages, bot_user_id, question)
         await post_message(channel_id, summary, thread_ts)
 
 options = {
@@ -141,7 +141,10 @@ async def handle_app_mention(event, say):
         text = event["text"]
         print("Event: ", text)
 
-        summarize_pattern = re.compile(r'summarize\s*(".*")?\s*([0-9]*)')
+        auth_test = await app.client.auth_test()
+        bot_user_id = auth_test["user_id"]
+
+        summarize_pattern = re.compile(r'summarize(?:\s+"(.*?)")?(?:\s+--limit\s+(\d+))?')
         match = summarize_pattern.search(text)
         
         if match:
@@ -153,7 +156,7 @@ async def handle_app_mention(event, say):
             print("Question: ", question)
             print("Limit: ", limit)
 
-            await handle_summarize_request(channel, question, thread_ts, limit)
+            await handle_summarize_request(channel, bot_user_id, question, thread_ts, limit)
         else:
             prompt = " ".join(text.split(" ")[1:])
             print("Prompt: ", prompt)
@@ -178,11 +181,12 @@ async def handle_app_mention(event, say):
                 parts = prompt.split("--limit")
                 prompt = parts[0]
                 limit = int(parts[1].strip()) if parts[1].strip().isdigit() else 10
+                print("Limit: ", limit)
 
             if prompt.strip() != "summarize":
                 question = prompt
 
-            await handle_summarize_request(channel, question, thread_ts, limit)
+            await handle_summarize_request(channel, bot_user_id, question, thread_ts, limit)
     except Exception as e:
         print(f"Error handling app_mention event: {e}")
 
