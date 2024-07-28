@@ -17,6 +17,13 @@ openai_organization_id = os.getenv("OPENAI_ORGANIZATION_ID")
 openai_project_id = os.getenv("OPENAI_PROJECT_ID")
 port = int(os.getenv('PORT', 3000))
 
+if os.getenv("NODE_ENV") == "development":
+    print("OpenAI API Key:", openai_api_key)
+    print("Slack Bot Token:", slack_token)
+    print("Slack Signing Secret:", slack_signing_secret)
+    print("OpenAI Organization ID:", openai_organization_id)
+    print("OpenAI Project ID:", openai_project_id)
+
 app = AsyncApp(
     token=slack_token,
     signing_secret=slack_signing_secret,
@@ -46,7 +53,6 @@ async def fetch_recent_messages(channel, limit=10, thread_ts=None):
                 SlackMessage(text=msg['text'], user=msg['user'], channel=channel, thread_ts=msg.get('thread_ts'))
                 for msg in result['messages']
             ]
-            #return [SlackMessage(**msg) for msg in result['messages']]
             return messages
         else:
             return []
@@ -64,23 +70,28 @@ def system_prompt(question=None):
         )
     }
 
+
 async def get_user_map(users):
     user_map = {}
     for user in users:
         user_info = await app.client.users_info(user=user)
-        user_map[user] = user_info.get('user', {}).get('name', 'Unknown')
+        #user_map[user] = user_info.get('user', {}).get('name', 'Unknown')
+        profile = user_info.get('user', {}).get('profile', {})
+        display_name = profile.get('display_name', '') or profile.get('real_name', 'Unknown')
+        user_map[user] = display_name
     return user_map
 
-#FIX
+
 async def summarize_text(chats, question=None):
     try:
         user_map = await get_user_map([chat.user for chat in chats])
         messages = []
+
         for chat in chats:
-            if chat.text.startswith("!summarize"):
+            if chat.text.startswith("summarize"):
                 continue
             speaker = user_map.get(chat.user, "Unknown")
-            if speaker == "Summarizer-Test": # Might need to change
+            if speaker == "summarizer":
                 continue
             if chat.text.startswith("<@U07AF4DJWRH>"):
                 continue
@@ -110,10 +121,9 @@ async def post_message(channel_id, text, thread_ts=None):
     except Exception as e:
         print(f"Error posting message: {e}")
 
-#FIX
 async def handle_summarize_request(channel_id, question=None, thread_ts=None, limit=10):
     messages = await fetch_recent_messages(channel_id, limit, thread_ts)
-    if messages:
+    if len(messages) > 0:
         summary = await summarize_text(messages, question)
         await post_message(channel_id, summary, thread_ts)
 
@@ -130,52 +140,55 @@ async def handle_app_mention(event, say):
         thread_ts = event.get("thread_ts")
         text = event["text"]
         print("Event: ", text)
-        prompt = " ".join(text.split(" ")[1:])
-        print("Prompt: ", prompt)
 
-        if prompt.strip() == "--help":
-            help_text = (
-                "```Usage: @Summarizer [summarize|question] [options]\n"
-                "If no question is provided but 'summarize', the last 10 messages will be summarized.\n"
-            )
-            help_text += "\n".join([f"{key}: {options[key]}" for key in options.keys()])
-            help_text += "```"
-            await post_message(channel, help_text, thread_ts)
-            return
-
-        if prompt.strip() == "--version":
-            await post_message(channel, "v1.0.0", thread_ts)
-            return
+        summarize_pattern = re.compile(r'summarize\s*(".*")?\s*([0-9]*)')
+        match = summarize_pattern.search(text)
         
-        question = None
-        limit = 10
-        if "--limit" in prompt:
-            parts = prompt.split("--limit")
-            prompt = parts[0]
-            limit = int(parts[1].strip()) if parts[1].strip().isdigit() else 10
-        
-        if prompt.strip() != "summarize":
-            question = prompt
+        if match:
+            question_match = match.group(1)
+            question = question_match[1:-1] if question_match else None
+            limit_match = match.group(2)
+            limit = int(limit_match) if limit_match.isdigit() else 10
 
-        await handle_summarize_request(channel, question, thread_ts, limit)
+            print("Question: ", question)
+            print("Limit: ", limit)
+
+            await handle_summarize_request(channel, question, thread_ts, limit)
+        else:
+            prompt = " ".join(text.split(" ")[1:])
+            print("Prompt: ", prompt)
+
+            if prompt.strip() == "--help":
+                help_text = (
+                    "```Usage: @Summarizer [summarize|question] [options]\n"
+                    "If no question is provided but 'summarize', the last 10 messages will be summarized.\n"
+                )
+                help_text += "\n".join([f"{key}: {options[key]}" for key in options.keys()])
+                help_text += "```"
+                await post_message(channel, help_text, thread_ts)
+                return
+
+            if prompt.strip() == "--version":
+                await post_message(channel, "v1.0.0", thread_ts)
+                return
+
+            question = None
+            limit = 10
+            if "--limit" in prompt:
+                parts = prompt.split("--limit")
+                prompt = parts[0]
+                limit = int(parts[1].strip()) if parts[1].strip().isdigit() else 10
+
+            if prompt.strip() != "summarize":
+                question = prompt
+
+            await handle_summarize_request(channel, question, thread_ts, limit)
     except Exception as e:
         print(f"Error handling app_mention event: {e}")
 
-#@app.event("message")
-# Check how the app runs when asked a question w/o summarize
-
-@app.message(re.compile(r'!summarize\s*(".*")?\s*([0-9]*)'))
-async def handle_message(context, message, say):
-    try:
-        question = context['matches'][1]
-        limit = int(context['matches'][2]) if context['matches'][2].isdigit() else 10
-        print("Question: ", question)
-        print("Limit: ", limit)
-        channel = message['channel']
-        thread_ts = message.get('thread_ts')
-        await handle_summarize_request(channel, question, thread_ts, limit)
-    except Exception as error:
-        print(f"Error handling message event: {error}")
+@app.event("message")
+async def handle_message_events(body, logger):
+    logger.info(body)
 
 if __name__ == "__main__":
     print(f"⚡️ Slack Bolt app is running on port {port}!")
