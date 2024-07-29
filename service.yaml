@@ -1,5 +1,5 @@
-name: slack-llm-bot-test
-message: Summarizer-Test
+name: llm-summarizer-slackbot
+message: Launch Summarizer Slackbot
 image: docker.io/node:lts
 resources:
   cluster: vessl-gcp-oregon
