@@ -1,6 +1,6 @@
 name: llm-summarizer-slackbot
 message: Launch Summarizer Slackbot
-image: docker.io/node:lts
+image: quay.io/vessl-ai/torch:2.1.0-cuda12.2-r3
 resources:
   cluster: vessl-gcp-oregon
   preset: gpu-l4-small
