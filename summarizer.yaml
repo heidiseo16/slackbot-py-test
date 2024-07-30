@@ -10,7 +10,7 @@ run:
   - command: |
 
       pip install -r requirements.txt
-      python app.py
+      python app-llama.py
     workdir: /app
 env:
   SLACK_BOT_TOKEN:
