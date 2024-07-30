@@ -8,7 +8,6 @@ import:
   /app: git://github.com/heidiseo16/slackbot-py-test.git
 run:
   - command: |
-
       pip install -r requirements.txt
       python app-llama.py
     workdir: /app
