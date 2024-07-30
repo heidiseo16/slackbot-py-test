@@ -18,9 +18,7 @@ env:
   SLACK_SIGNING_SECRET:
     secret: slack-signing-secret
     source: secret
-  LLAMA3_BASE_URL:
-    secret: llama3-base-url
-    source: secret
+  LLAMA3_BASE_URL: <LLAMA3_BASE_URL>
   ACCESS_TOKEN:
     secret: access-token
     source: secret
